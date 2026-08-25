@@ -1,0 +1,335 @@
+#include <iostream>
+#include <fstream>
+#include <sstream>
+#include <vector>
+#include <string>
+#include <lodepng.h>
+#include <algorithm>
+
+/// --- DRAW PIXEL ---
+// --- DRAW PIXEL ---
+/// --- DRAW PIXEL ---
+// --- DRAW PIXEL ---
+/// --- DRAW PIXEL ---
+
+// --- draws pixel into an RGBA image buffer --
+void drawPixel(std::vector<uint8_t>& imageBuffer,
+    std::vector<float>& depthBuffer,
+    int width, int height, int nChannels,
+    int x, int y, float depth,
+    uint8_t r, uint8_t g, uint8_t b)
+{
+    if (x < 0 || x >= width || y < 0 || y >= height)
+        return;
+
+    int pixelIdx = x + y * width;
+
+    // Don't draw if another pixel is closer
+    if (depth >= depthBuffer[pixelIdx])
+        return;
+
+    depthBuffer[pixelIdx] = depth;
+
+    imageBuffer[pixelIdx * nChannels + 0] = r;
+    imageBuffer[pixelIdx * nChannels + 1] = g;
+    imageBuffer[pixelIdx * nChannels + 2] = b;
+    imageBuffer[pixelIdx * nChannels + 3] = 255;
+
+}
+
+// --- DRAW LINE ---
+// --- DRAW LINE ---
+/// --- DRAW LINE ---
+// --- DRAW LINE ---
+/// --- DRAW LINE ---
+
+// -- two lines that connect from two points --
+// ---- interpolation ---
+void drawLine(std::vector<uint8_t>& imageBuffer,
+    std::vector<float>& depthBuffer,
+    int width, int height, int nChannels,
+    int x1, int y1, int x2, int y2)
+{
+    for (int i = 0; i <= 1000; i++)
+    {
+        float t = i / 1000.0f;
+
+        int x = x1 + t * (x2 - x1);
+        int y = y1 + t * (y2 - y1);
+
+        drawPixel(imageBuffer, depthBuffer, width, height, nChannels,
+            x, y, 0.0f, 255, 255, 255);
+    }
+}
+
+/// --- FILL TRIANGLE ---
+// --- FILL TRIANGLE ---
+/// --- FILL TRIANGLE ---
+// --- FILL TRIANGLE ---
+/// --- FILL TRIANGLE ---
+// --- FILL TRIANGLE ---
+
+// --- fills triangles by using barycentric edge tests --
+void fillTriangle(
+    std::vector<uint8_t>& imageBuffer,
+    std::vector<float>& depthBuffer,
+    int width, int height, int nChannels,
+    int x1, int y1, float z1,
+    int x2, int y2, float z2,
+    int x3, int y3, float z3)
+{
+    // --- calculates smallest bounding box around triangles --
+    int minX = std::max(0, std::min({ x1, x2, x3 }));
+    int maxX = std::min(width - 1, std::max({ x1, x2, x3 }));
+
+    int minY = std::max(0, std::min({ y1, y2, y3 }));
+    int maxY = std::min(height - 1, std::max({ y1, y2, y3 }));
+
+    float area = (x2 - x1) * (y3 - y1) - (y2 - y1) * (x3 - x1);
+
+    for (int y = minY; y <= maxY; y++)
+    {
+        for (int x = minX; x <= maxX; x++)
+        {
+            float w0 = (x2 - x1) * (y - y1) - (y2 - y1) * (x - x1);
+            float w1 = (x3 - x2) * (y - y2) - (y3 - y2) * (x - x2);
+            float w2 = (x1 - x3) * (y - y3) - (y1 - y3) * (x - x3);
+
+            // --- draw a pixel if its inside the trinagle --
+            if ((w0 >= 0 && w1 >= 0 && w2 >= 0) ||
+                (w0 <= 0 && w1 <= 0 && w2 <= 0))
+            {
+                float alpha = w1 / area;
+                float beta = w2 / area;
+                float gamma = 1.0f - alpha - beta;
+
+                float depth =
+                    alpha * z1 +
+                    beta * z2 +
+                    gamma * z3;
+
+                drawPixel(imageBuffer, depthBuffer,
+                    width, height, nChannels,
+                    x, y, depth,
+                    255, 255, 255);
+            }
+        }
+    }
+}
+
+
+// --- stores a single 3D position from the OBJ file --
+struct Vertex
+{
+    float x, y, z;
+};
+
+// --- stores one triangle --
+struct Face
+{
+    int v1, v2, v3;
+};
+
+// --- PROJECT VERTEX ---
+/// --- PROJECT VERTEX ---
+// --- PROJECT VERTEX ---
+/// --- PROJECT VERTEX ---
+// --- PROJECT VERTEX ---
+/// --- PROJECT VERTEX ---
+
+// --- convert 3D to 2D and keep depth ---
+void projectVertex(const Vertex& v, int& sx, int& sy, float& depth)
+{
+    float scale = 400.0f;
+    float cameraZ = 40.0f;
+
+    depth = v.z + cameraZ;
+
+    sx = int((v.x / depth) * scale + 960);
+    sy = int(540 - (v.y / depth) * scale);
+}
+
+// --- MAIN LOOP ---
+/// --- MAIN LOOP ---
+// --- MAIN LOOP ---
+/// --- MAIN LOOP ---
+// --- MAIN LOOP ---
+/// --- MAIN LOOP ---
+int main()
+{
+	std::string outputFilename = "output.png";
+    // --- stores models geometry --
+    std::vector<Vertex> vertices;
+    std::vector<Face> faces;
+
+    // --- opens the exported blender model from files --
+    std::ifstream file("../../../Outlast room update2.obj");
+
+    if (!file.is_open())
+    {
+        std::cout << "Failed to open OBJ file!" << std::endl;
+        return 1;
+    }
+
+    std::string line;
+
+    // --- reads the OBJ file --
+    while (std::getline(file, line))
+    {
+        std::stringstream ss(line);
+        std::string prefix;
+        ss >> prefix;
+
+        // -- reads vertex --
+        if (prefix == "v")
+        {
+            Vertex v;
+            ss >> v.x >> v.y >> v.z;
+            vertices.push_back(v);
+        }
+        // --- reads faces --
+        else if (prefix == "f")
+        {
+            std::vector<std::string> tokens;
+            std::string token;
+
+            while (ss >> token)
+                tokens.push_back(token);
+
+            if (tokens.size() >= 3)
+            {
+                auto getIndex = [](const std::string& s)
+                    {
+                        return std::stoi(s.substr(0, s.find('/'))) - 1;
+                    };
+
+                // --- First triangle --
+                faces.push_back({
+                    getIndex(tokens[0]),
+                    getIndex(tokens[1]),
+                    getIndex(tokens[2])
+                    });
+
+                // --- If its a quad, split it into a second triangle --
+                if (tokens.size() == 4)
+                {
+                    faces.push_back({
+                        getIndex(tokens[0]),
+                        getIndex(tokens[2]),
+                        getIndex(tokens[3])
+                        });
+                }
+            }
+        }
+    }
+
+    std::cout << "Loaded "
+        << vertices.size() << " vertices and "
+        << faces.size() << " faces." << std::endl;
+
+
+	const int width = 1920, height = 1080;
+	const int nChannels = 4;
+
+	// --- allocates memory for the output image --
+	std::vector<uint8_t> imageBuffer(height*width*nChannels);
+
+    // --- stores the closest depth value for every pixel --
+    // -- 1e9f, REEAL big number --
+    std::vector<float> depthBuffer(width * height, 1e9f);
+
+    // --- Fill the background in black ---
+    for (int y = 0; y < height; y++)
+    {
+        for (int x = 0; x < width; x++)
+        {
+            int pixelIdx = (x + y * width) * nChannels;
+
+            imageBuffer[pixelIdx + 0] = 0;
+            imageBuffer[pixelIdx + 1] = 0;
+            imageBuffer[pixelIdx + 2] = 0;
+            imageBuffer[pixelIdx + 3] = 255;
+        }
+    }
+
+
+    // --- drawing two triangles -- ///
+   // fillTriangle(imageBuffer, width, height, nChannels,
+       // 500, 250,
+       // 900, 750,
+       // 500, 750);
+
+    // fillTriangle(imageBuffer, width, height, nChannels,
+       // 900, 250,
+       // 900, 750,
+       // 500, 250);
+
+    // --- draw OBJ wireframe ---
+    for (const Face& face : faces)
+    {
+        // --- skips invalid indices ---
+        if (face.v1 < 0 || face.v1 >= vertices.size() ||
+            face.v2 < 0 || face.v2 >= vertices.size() ||
+            face.v3 < 0 || face.v3 >= vertices.size())
+        {
+            continue;
+        }
+
+        Vertex a = vertices[face.v1];
+        Vertex b = vertices[face.v2];
+        Vertex c = vertices[face.v3];
+
+        int ax, ay, bx, by, cx, cy;
+        float az, bz, cz;
+
+        projectVertex(a, ax, ay, az);
+        projectVertex(b, bx, by, bz);
+        projectVertex(c, cx, cy, cz);
+
+        // --- calculate two edges of the triangle ---
+        float abx = b.x - a.x;
+        float aby = b.y - a.y;
+        float abz = b.z - a.z;
+
+        float acx = c.x - a.x;
+        float acy = c.y - a.y;
+        float acz = c.z - a.z;
+
+        // --- calculate the face normal using a cross ---
+        float nx = aby * acz - abz * acy;
+        float ny = abz * acx - abx * acz;
+        float nz = abx * acy - aby * acx;
+
+        // --- skip all the faces pointing away from the camera --
+        if (nz >= 0)
+        {
+            continue;
+        }
+
+        // drawLine(imageBuffer, depthBuffer, width, height, nChannels, ax, ay, bx, by);
+        // drawLine(imageBuffer, depthBuffer, width, height, nChannels, bx, by, cx, cy);
+        // drawLine(imageBuffer, depthBuffer, width, height, nChannels, cx, cy, ax, ay);
+
+        // --- FILL TRIANGLES ---
+        /// --- FILL TRIANGLES ---
+        // --- FILL TRIANGLES ---
+        /// --- FILL TRIANGLES ---
+        // --- FILL TRIANGLES ---
+        fillTriangle(imageBuffer, depthBuffer,
+            width, height, nChannels,
+            ax, ay, az,
+            bx, by, bz,
+            cx, cy, cz);
+    }
+
+
+    // --- Save the final image ---
+    int errorCode;
+        errorCode = lodepng::encode(outputFilename, imageBuffer, width, height);
+        if (errorCode) { // --- check the error code, in case an error occurred --
+            std::cout << "lodepng error encoding image: " << lodepng_error_text(errorCode) << std::endl;
+            return errorCode;
+        }
+
+    return 0;
+}

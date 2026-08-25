@@ -1,0 +1,18 @@
+{
+    "pixWidth": 640,
+    "pixHeight": 360,
+
+    "maxBounces": 1,
+
+    "clearColor": [ 0, 0, 0, 255 ],
+
+    "cameraPos": [ 0.0, 0.0, -10.0 ],
+    "cameraForward": [ 0.0, 0.0, 1.0 ],
+    "cameraUp": [ 0.0, 1.0, 0.0 ],
+
+    "cameraFov": 0.785,
+
+    "shuffleScanlines": true,
+
+    "outputFilename": "output.png"
+}
